@@ -1,0 +1,31 @@
+# Contraseñas y variables de entorno
+.env
+.env.*
+!.env.example
+
+# Archivos compilados de Java
+**/target/
+*.class
+
+# Configuración de editores
+.idea/
+.vscode/
+.project
+.classpath
+.settings/
+
+# Archivos temporales
+*.log
+*.tmp
+*.bak
+*~
+
+# Respaldos
+respaldos/
+*.sql
+*.tar.gz
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+error_compilacion.txt
