@@ -29,3 +29,14 @@ curl -i -X POST http://localhost:8080/api/exchange -H 'Content-Type: application
 - La base se inicializa con 2 usuarios y un producto de prueba (id 10, precio 500, stock 20).
 - La plataforma de origen se simula con curl o Postman.
 - Git: `.env` está ignorado; cada integrante puede trabajar en su rama.
+
+## Reintentos y cola de errores (DLQ)
+
+- Si el usuario **no tiene coins** (la plataforma responde 402), el worker **no descarta** la compra: la pasa a la cola de espera `exchange.retry`. Tras `WORKER_RETRY_DELAY_MS` (15 s por defecto) RabbitMQ la devuelve a `exchange.requests` y se vuelve a intentar. El worker no se bloquea: otros usuarios siguen comprando mientras tanto.
+- Se reintenta hasta `WORKER_MAX_ATTEMPTS` veces (240 por defecto = 1 hora). Si el usuario recarga coins en ese tiempo, la compra se completa sola.
+- Cuando una compra se rechaza de forma definitiva (pasó la hora sin coins, producto o usuario inexistente, sin stock), el worker la **registra en la tabla `compra_fallida`** con el motivo y los intentos. Consultar: `GET localhost:8080/api/failures/{idUser}` (o `GET localhost:8090/api/failures` para todas).
+- Errores permanentes (400, 404, 409 por falta de stock) y compras que agotan los intentos van a `exchange.requests.dlq` (visible en RabbitMQ, puerto 15672). Nada se pierde. Para reprocesar la DLQ: en la interfaz de RabbitMQ, cola `exchange.requests.dlq` > "Move messages" hacia `exchange.requests`.
+- Si la cola `exchange.requests` ya existía sin DLQ, bórrala antes: `docker compose exec queue rabbitmqctl delete_queue exchange.requests`.
+- Probar: `POST localhost:8090/api/coins/2/remove {"amount":1000}`, enviar una compra del usuario 2 y ver `docker compose logs -f worker`; luego `POST localhost:8090/api/coins/2/add {"amount":1000}`.
+- Balanceo: `curl -i localhost:8081/api/node/info` muestra `X-Node` y `X-Upstream`; `curl localhost:8081/health` comprueba nginx.
+- Colección Postman lista en `postman/coins.postman_collection.json`.

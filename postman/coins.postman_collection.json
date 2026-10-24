@@ -1,0 +1,426 @@
+{
+  "info": {
+    "name": "Proyecto Coins Microservicios",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "endpoint",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "balancer",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "platform",
+      "value": "http://localhost:8090"
+    },
+    {
+      "key": "rabbit",
+      "value": "http://localhost:15672"
+    },
+    {
+      "key": "idUser",
+      "value": "1"
+    },
+    {
+      "key": "mount",
+      "value": "500"
+    },
+    {
+      "key": "conteo",
+      "value": "{}"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Flujo normal",
+      "item": [
+        {
+          "name": "POST /api/exchange (asincrono, 202)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{endpoint}}/api/exchange",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idPlatformOrigin\": 1,\n  \"idCoin\": 1,\n  \"idPlatformDestiny\": 2,\n  \"idProduct\": 10,\n  \"Mount\": {{mount}},\n  \"Quantity\": 1,\n  \"idUser\": {{idUser}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202 encolado', () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/coins/{idUser} (sincrono via balanceador)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{endpoint}}/api/coins/{{idUser}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "console.log('Atendido por:', pm.response.headers.get('X-Node'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver compras guardadas (plataforma destino)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{platform}}/api/purchases"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Sin coins / recarga",
+      "item": [
+        {
+          "name": "Quitar 1000 coins al usuario 2 (queda en 0)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{platform}}/api/coins/2/remove",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"amount\": 1000 }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Compra de usuario 2 (402, el worker reintenta)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{endpoint}}/api/exchange",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idPlatformOrigin\": 1,\n  \"idCoin\": 1,\n  \"idPlatformDestiny\": 2,\n  \"idProduct\": 10,\n  \"Mount\": 500,\n  \"Quantity\": 1,\n  \"idUser\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Recargar usuario 2 (1000 coins)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{platform}}/api/coins/2/add",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"amount\": 1000 }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Ver coins usuario 2",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{endpoint}}/api/coins/2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Balanceador (Runner x30)",
+      "item": [
+        {
+          "name": "GET /api/node/info via balancer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{balancer}}/api/node/info"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const n = pm.response.headers.get('X-Node');",
+                  "const c = JSON.parse(pm.collectionVariables.get('conteo') || '{}');",
+                  "c[n] = (c[n] || 0) + 1;",
+                  "pm.collectionVariables.set('conteo', JSON.stringify(c));",
+                  "console.log('Reparto por nodo:', JSON.stringify(c), 'upstream:', pm.response.headers.get('X-Upstream'));",
+                  "pm.test('responde algun nodo', () => pm.expect(n).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET coins via endpoint (cabecera X-Node)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{endpoint}}/api/coins/1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const n = pm.response.headers.get('X-Node');",
+                  "const c = JSON.parse(pm.collectionVariables.get('conteo') || '{}');",
+                  "c[n] = (c[n] || 0) + 1;",
+                  "pm.collectionVariables.set('conteo', JSON.stringify(c));",
+                  "console.log('Reparto por nodo:', JSON.stringify(c), 'upstream:', pm.response.headers.get('X-Upstream'));",
+                  "pm.test('responde algun nodo', () => pm.expect(n).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reiniciar conteo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{balancer}}/api/node/info"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('conteo','{}');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Errores",
+      "item": [
+        {
+          "name": "Mensaje invalido (Quantity 0) -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{endpoint}}/api/exchange",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idPlatformOrigin\": 1,\n  \"idCoin\": 1,\n  \"idPlatformDestiny\": 2,\n  \"idProduct\": 10,\n  \"Mount\": {{mount}},\n  \"Quantity\": 0,\n  \"idUser\": {{idUser}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Producto inexistente -> el worker lo manda a la DLQ",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{endpoint}}/api/exchange",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idPlatformOrigin\": 1,\n  \"idCoin\": 1,\n  \"idPlatformDestiny\": 2,\n  \"idProduct\": 999,\n  \"Mount\": {{mount}},\n  \"Quantity\": 1,\n  \"idUser\": {{idUser}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Usuario inexistente -> DLQ",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{endpoint}}/api/exchange",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idPlatformOrigin\": 1,\n  \"idCoin\": 1,\n  \"idPlatformDestiny\": 2,\n  \"idProduct\": 10,\n  \"Mount\": {{mount}},\n  \"Quantity\": 1,\n  \"idUser\": 99\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Compras rechazadas del usuario (via endpoint)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{endpoint}}/api/failures/{{idUser}}"
+          }
+        },
+        {
+          "name": "Todas las compras rechazadas (plataforma)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{platform}}/api/failures"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. RabbitMQ (API de gestion)",
+      "item": [
+        {
+          "name": "Estado exchange.requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{rabbit}}/api/queues/%2F/exchange.requests",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "datacloud",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "datacloud123",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const q=pm.response.json();console.log('ready:',q.messages_ready,'unacked:',q.messages_unacknowledged,'consumers:',q.consumers);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Estado exchange.requests.dlq",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{rabbit}}/api/queues/%2F/exchange.requests.dlq",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "datacloud",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "datacloud123",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const q=pm.response.json();console.log('en DLQ:',q.messages);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

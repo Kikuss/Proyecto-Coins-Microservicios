@@ -12,9 +12,11 @@ import jakarta.persistence.*;import java.util.Map;
   if(user==null||product==null)return ResponseEntity.status(404).body(Map.of("error","Usuario o producto inexistente"));
   long total=(long)product.price*r.Quantity();
   if(total!=r.Mount())return ResponseEntity.badRequest().body(Map.of("error","Monto no coincide con precio por cantidad"));
-  if(user.balance<total||product.stock<r.Quantity())return ResponseEntity.status(409).body(Map.of("error","Saldo o existencias insuficientes"));
+  if(user.balance<total)return ResponseEntity.status(402).body(Map.of("error","Saldo insuficiente"));
+  if(product.stock<r.Quantity())return ResponseEntity.status(409).body(Map.of("error","Existencias insuficientes"));
   user.balance-=(int)total;product.stock-=r.Quantity();purchases.save(new Purchase(r));
   return ResponseEntity.ok(Map.of("message","Compra registrada","saldo",user.balance));
  }
+ @GetMapping("/purchases") public java.util.List<Purchase> purchases(){return purchases.findAll();}
  @GetMapping("/coins/{idUser}") public ResponseEntity<?> coins(@PathVariable Integer idUser){UserCoins u=em.find(UserCoins.class,idUser);return u==null?ResponseEntity.notFound().build():ResponseEntity.ok(Map.of("idUser",u.id,"coins",u.balance));}
 }
